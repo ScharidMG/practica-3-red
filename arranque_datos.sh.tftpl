@@ -1,0 +1,21 @@
+#!/bin/bash
+# La salida a internet sale por Cloud NAT; puede tardar unos segundos en estar
+# lista despues de crear la maquina, asi que se reintenta.
+for i in 1 2 3 4 5 6; do
+  apt-get update -y && apt-get install -y nginx && break
+  sleep 10
+done
+
+# nginx escucha en 8080 (el puerto que abre la regla app -> datos)
+sed -i 's/listen 80 default_server;/listen 8080 default_server;/' /etc/nginx/sites-available/default
+sed -i 's/listen \[::\]:80 default_server;/listen [::]:8080 default_server;/' /etc/nginx/sites-available/default
+
+INTERNA=$(curl -s -H "Metadata-Flavor: Google" \
+  http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/ip)
+
+cat > /var/www/html/index.html <<HTML
+<h2>Dato servido por la maquina privada</h2>
+<p>${identificacion}. Host: $(hostname) &middot; IP interna: $INTERNA &middot; sin IP publica</p>
+HTML
+
+systemctl restart nginx
