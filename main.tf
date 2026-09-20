@@ -30,8 +30,8 @@ resource "google_compute_subnetwork" "publica" {
 resource "google_compute_instance" "app" {
   name         = "${var.prefijo}-app"
   machine_type = var.tipo_maquina
-  zone         = <?>
-  tags         = ["<etiqueta de red que usará el cortafuegos>"]
+  zone         = var.zona
+  tags         = ["servidor-web"]
 
   boot_disk {
     initialize_params {
@@ -40,11 +40,9 @@ resource "google_compute_instance" "app" {
   }
 
   network_interface {
-    # la máquina debe quedar en tu subred, no en la default
-    subnetwork = <?>
-    # un bloque vacío aquí otorga una IP pública efímera
+    subnetwork = google_compute_subnetwork.publica.id
     access_config {}
   }
 
-  metadata_startup_script = <?  carga el contenido de arranque.sh>
+  metadata_startup_script = file("${path.module}/arranque.sh")
 }
