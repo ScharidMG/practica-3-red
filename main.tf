@@ -46,3 +46,33 @@ resource "google_compute_instance" "app" {
 
   metadata_startup_script = file("${path.module}/arranque.sh")
 }
+
+#masañadidos
+
+resource "google_compute_firewall" "app_http" {
+  name    = "${var.prefijo}-permitir-http"
+  network = google_compute_network.vpc.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["80"]
+  }
+
+  source_ranges = ["0.0.0.0/0"]
+  target_tags   = ["servidor-web"]
+}
+
+resource "google_compute_firewall" "ssh_iap" {
+  name    = "${var.prefijo}-permitir-ssh-iap"
+  network = google_compute_network.vpc.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+
+  # 35.235.240.0/20 es el rango desde el que Google reenvia SSH por IAP
+  source_ranges = ["35.235.240.0/20"]
+  target_tags   = ["servidor-web", "servidor-datos"]
+}
+
