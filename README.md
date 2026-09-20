@@ -169,25 +169,35 @@ git ls-files
 
 **Si le quitas la etiqueta de red a la máquina de aplicación y aplicas, ¿qué deja de funcionar exactamente, y por qué la regla de cortafuegos sigue existiendo?**
 
-Terraform actualiza la máquina en el lugar (el cambio de `tags` no la recrea) y dejan de funcionar tres cosas, porque las tres reglas identificaban a la aplicación por la etiqueta `servidor-web`: la regla `permitir-http` (puerto 80) ya no coincide con la máquina, así que el tráfico desde internet se descarta y el `curl` se queda esperando hasta agotar el tiempo; la regla `permitir-ssh-iap` tampoco la alcanza, por lo que se pierde el SSH por IAP hacia la aplicación; y `permitir-app-a-datos`, que usa `source_tags = ["servidor-web"]`, ya no reconoce a la aplicación como origen válido hacia la máquina de datos. Nginx sigue corriendo dentro de la aplicación, porque la máquina no se reinició: el servidor funciona, pero la red no le deja pasar el tráfico. Las reglas siguen existiendo porque son recursos de la VPC independientes de las instancias: una regla no está "pegada" a una máquina, sino que describe un filtro para los paquetes de cualquier máquina que lleve cierta etiqueta. Quitar la etiqueta cambia qué máquinas coinciden con la regla, no la regla; esta sigue en el código y en el estado, y se aplicaría de nuevo a cualquier máquina que la lleve.
+Dejan de funcionar tres cosas, porque las tres reglas de cortafuegos identificaban a la app por esa etiqueta:
+
+app_http (puerto 80) apunta a servidor-web, así que la app ya no coincide y el HTTP desde internet se descarta. El curl se queda esperando hasta agotar el tiempo.
+ssh_iap también apuntaba a servidor-web, así que pierden el SSH por IAP a la app.
+app_a_datos usa source_tags = ["servidor-web"], así que la app dejaría de ser un origen válido hacia la máquina de datos.
+
+nginx sigue corriendo dentro de la app, porque la máquina no se reinició. El servidor funciona, pero la red no deja pasar el tráfico.
 
 **¿Por qué el `plan` de la fase 2 no propuso ningún cambio, si el código era distinto? ¿Qué habrías tenido que cambiar para que sí propusiera recrear un recurso?**
 
-Terraform no compara el texto del código, sino el resultado de evaluarlo: sustituye las variables por sus valores y compara los argumentos finales de cada recurso con el estado y con lo que existe en Google Cloud. En la fase 2 se pasaron valores escritos a mano a variables con los mismos valores por defecto, así que el nombre, la región y el rango de cada recurso eran idénticos y no había nada que modificar (lo único que el plan mostró fueron los outputs nuevos, "Changes to Outputs", sin cambios en recursos). Para que propusiera recrear un recurso habría que cambiar un argumento que el proveedor no puede modificar en caliente, algo que el plan marca como `# forces replacement`: por ejemplo el `prefijo` (cambia el nombre de la VPC, las subredes, las máquinas y las reglas, y esos nombres son inmutables), la `zona` de una instancia, la `image` de su disco de arranque o la `region` de una subred.
+Terraform no compara el texto del código. Evalúa el código, sustituye las variables, y compara el resultado con lo que ya existe. Al pasar valores escritos a mano a variables con los mismos valores, los argumentos finales (nombre, rango, región) son idénticos, así que no hay nada que modificar.
+
+Para que propusiera recrear algo, habría que cambiar un argumento que el proveedor no puede modificar en caliente, y el plan lo marca # forces replacement.
 
 **Con la red completa encendida, ¿cuánto costaría un mes? Desglosa por recurso y señala cuál es el que más sorprende.**
 
-Estimación con precios de lista de `us-central1`, 720 horas al mes, tráfico despreciable y discos `pd-standard` de 10 GB (el tipo que muestra el plan de Terraform):
+Estimación con precios de lista de us-central1, 720 horas al mes, tráfico despreciable y discos pd-standard de 10 GB (el tipo que muestra el plan de Terraform):
+
+![cifras](./Evidencias/cifras.png)
 
 | Recurso | Cálculo | USD/mes |
 |---|---|---|
-| 2 máquinas `e2-micro` | ≈ 6.1 cada una | ≈ 12.2 |
-| 2 discos de arranque `pd-standard` de 10 GB | 0.04 USD/GB-mes × 10 GB × 2 | ≈ 0.8 |
+| 2 máquinas e2-micro | ≈ 6.1 cada una | ≈ 12.2 |
+| 2 discos de arranque pd-standard de 10 GB | 0.04 USD/GB-mes × 10 GB × 2 | ≈ 0.8 |
 | IP pública efímera de la aplicación | 0.005 USD/h × 720 h | ≈ 3.6 |
 | Cloud NAT, puerta de enlace | 0.0014 USD/h × 1 VM × 720 h | ≈ 1.0 |
 | Cloud NAT, IP externa del gateway | 0.005 USD/h × 720 h (al menos una) | ≈ 3.6 |
 | Cloud NAT, datos procesados | 0.045 USD/GiB, casi sin tráfico | ≈ 0 |
 | VPC, dos subredes, Cloud Router y 3 reglas de cortafuegos | gratuitos | 0 |
-| **Total aproximado** | | **≈ 21** |
+| *Total aproximado* | | *≈ 21* |
 
-Lo que más sorprende es Cloud NAT: aunque la puerta de enlace en sí cuesta apenas 1 USD, el NAT necesita su propia IP externa que se cobra por hora, de modo que el conjunto (≈ 4.6 USD) equivale a casi tres cuartas partes de lo que cuesta una de las máquinas, y se cobra por existir aunque las dos máquinas estén apagadas. Es el primer recurso del curso que factura por estar creado y no por trabajar, y por eso se hace `terraform destroy` al terminar cada sesión de trabajo. El precio de la `e2-micro` varía según la fuente consultada, así que el total es una estimación, no una factura.
+Lo que más sorprende es Cloud NAT: aunque la puerta de enlace en sí cuesta apenas 1 USD, el NAT necesita su propia IP externa que se cobra por hora, de modo que el conjunto (≈ 4.6 USD) equivale a casi tres cuartas partes de lo que cuesta una de las máquinas, y se cobra por existir aunque las dos máquinas estén apagadas. Es el primer recurso del curso que factura por estar creado y no por trabajar, y por eso se hace terraform destroy al terminar cada sesión de trabajo. El total es una estimación con precios de lista, no una factura. Como contraste, el informe de facturación del proyecto por SKU (en pesos colombianos) registró, durante el tiempo que la red estuvo encendida, 1.11 horas de uso tanto de la IP como de la puerta de enlace de Cloud NAT y 4.4 GiB-hora de memoria en las instancias, lo que corresponde a un NAT con una IP y a dos e2-micro de 1 GiB. El cargo de las instancias (75 COP de vCPU y 40 COP de memoria) repartido en 4.4 horas-máquina da unos 26 COP por hora, es decir, unos 0.0084 USD por hora y por e2-micro a un cambio aproximado de 3,100 COP por dólar (≈ 6 USD al mes), que es el valor usado en la tabla; y la proporción entre los cargos de la IP del NAT y de la puerta de enlace (17 a 5) coincide con la de las tarifas de lista. Esos cargos quedaron cubiertos por descuentos y créditos promocionales, por lo que el total facturado fue de 0.
